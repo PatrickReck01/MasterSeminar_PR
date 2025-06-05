@@ -1,7 +1,12 @@
-from ollama_inference import run_ollama_inference
-
 import json
 import re
+
+from ollama_inference import run_ollama_inference
+try:
+    from qag_utils import calc_QAG_metric, extract_info_from_qag_metric
+except ModuleNotFoundError:
+    from Bio_QAG_Score.qag_utils import calc_QAG_metric, extract_info_from_qag_metric
+
 
 def parse_json(json_str):
     # Step 1: Try parsing directly
@@ -25,10 +30,44 @@ def parse_json(json_str):
             except json.JSONDecodeError:
                 print("JSON extraction failed.")
                 raise ValueError("Failed to parse JSON from the response.")
-             
+
+        # print("Final attempt: Returning an empty list due to parsing failure.")
+        # return []
+
+
 def get_assesment_questions(text,model,num_questions=5):
     print("Generating assessment questions...")
     print("Using model:", model)
+    prompt = f"""
+TASK:
+Generate exactly {num_questions} closed-ended questions (yes/no questions) based ONLY on the provided biomedical text.
+- Focus on the key biomedical aspects (e.g., SNPs and their effects). These questions will be used to assess the quality of a summary of the text, so make sure they cover all the important aspects of the text.
+- The questions must be clear, concise, and based only on information from the text.
+- The questions will be used to evaluate a summary of the text, so they should cover the main aspects of the text.
+- DO NOT answer the questions.
+- DO NOT provide explanations or commentary.
+- DO NOT output anything other than the questions.
+
+OUTPUT FORMAT:
+Return ONLY a JSON list of questions, with each question as a string.
+
+Example:
+[
+    "Is SNP rs123 associated with an increased risk of disease X?",
+    "Does mutation Y affect gene Z expression?",
+    "Is protein A involved in metabolic pathway B?",
+    "Was a significant correlation found between SNP rs456 and condition C?",
+    "Is treatment D effective for patients with mutation E?"
+]
+
+IMPORTANT:
+- Return ONLY the raw JSON list. 
+- DO NOT include any other text (no introductions, no labels like 'Here are the questions:', no markdown formatting, no explanations).
+
+Biomedical Text:
+{text}
+
+"""
     
     prompt_2 =f"""You are a biomedical research evaluator. Your task is to generate a list of {num_questions} close-ended factual questions that can be answered with the original text.
 
@@ -84,65 +123,6 @@ Generate the list of assessment questions and answers in JSON format only.
     return questions
 
 
-from deepeval.test_case import LLMTestCase
-from deepeval.metrics import SummarizationMetric
-
-def calc_QAG_metric(original_text, sum_text,assessment_questions=None):
-    test_case = LLMTestCase(
-        input=original_text, 
-        actual_output=sum_text,
-    )
-
-    # OpenAI API key is set in the environment variable
-    # if assessment_questions is None:
-    #     summarization_metric = SummarizationMetric(model=model)
-    # else:
-    #     summarization_metric = SummarizationMetric(model=model,
-    #                                                assessment_questions=assessment_questions,)
-
-
-    # Ollama
-    if assessment_questions is None:
-        summarization_metric = SummarizationMetric(async_mode=False)
-    else:
-        summarization_metric = SummarizationMetric(assessment_questions=assessment_questions,
-                                                   async_mode=False)
-
-    summarization_metric.measure(test_case=test_case)
-
-    return summarization_metric
-
-
-
-def extract_info_from_qag_metric(metric:SummarizationMetric):
-    
-    final_score = metric.score
-    alignement_score = metric.score_breakdown['Alignment']
-    coverage_score = metric.score_breakdown['Coverage']
-
-    assesment_questions = metric.assessment_questions
-    coverage_verdicts = metric.coverage_verdicts
-    alignment_verdicts = metric.alignment_verdicts
-
-    claims = metric.claims
-
-    truths = metric.truths
-
-    res = {
-        'final_score': final_score,
-        'alignement_score': alignement_score,
-        'coverage_score': coverage_score,
-        'assesment_questions': assesment_questions,
-        'coverage_verdicts': coverage_verdicts,
-        'alignment_verdicts': alignment_verdicts,
-        'claims': claims,
-        'truths': truths
-    }
-    return res
-
-
-
-
 def calc_bio_qag_score(original_text, summary,model="llama3.2:latest"):
     """
     Calculate the QAG score based on the generated questions and the original text.
@@ -173,11 +153,13 @@ def calc_bio_qag_score(original_text, summary,model="llama3.2:latest"):
     return info['final_score'], info['alignement_score'], info['coverage_score']
     
 
-if __name__ == "__main__":
-    # IMPORTANT:
-    # Make sure to run the following command in the terminal with your conda environment activated to use local ollama model for evaluation: deepeval set-ollama mistral:latest
 
-    # Example text and summary
+
+
+if __name__ == "__main__":
+    
+
+    # Example usage
     text = """
 Single Nucleotide Polymorphisms (SNPs) are the most common type of genetic variation found in the human genome. A SNP occurs when a single nucleotide — the building blocks of DNA — is altered, potentially affecting the function of genes and, ultimately, the traits they control. These minute changes, though subtle, can have significant implications for human health and disease.
 
@@ -189,9 +171,13 @@ In recent years, advances in genomic technologies, such as genome-wide associati
 """
 
 
-    summ = """Single Nucleotide Polymorphisms (SNPs) are common genetic variations where a single nucleotide in the DNA sequence is altered. These variations play a crucial role in biomedicine, influencing susceptibility to diseases like cancer, cardiovascular issues, and neurological disorders. SNPs are key in personalized medicine, allowing for tailored treatments based on genetic profiles. Advances in genomic technologies, such as genome-wide association studies (GWAS), have helped identify SNPs linked to diseases. The ongoing research into SNPs holds great potential for improving diagnostics, treatments, and prevention strategies, ultimately enhancing personalized healthcare and patient outcomes."""
+    summ = """
+Single Nucleotide Polymorphisms (SNPs) are common genetic variations where a single nucleotide in the DNA sequence is altered. These variations play a crucial role in biomedicine, influencing susceptibility to diseases like cancer, cardiovascular issues, and neurological disorders. SNPs are key in personalized medicine, allowing for tailored treatments based on genetic profiles. Advances in genomic technologies, such as genome-wide association studies (GWAS), have helped identify SNPs linked to diseases. The ongoing research into SNPs holds great potential for improving diagnostics, treatments, and prevention strategies, ultimately enhancing personalized healthcare and patient outcomes.
+"""
 
-    score, alignment, coverage = calc_bio_qag_score(text, summ,model="mistral:latest")
-    print("Bio-QAG Score:", score)
+    score, alignment, coverage = calc_improved_qag_score(text, summ,model="mistral:latest")
+    print("QAG Score:", score)
     print("Coverage Score:", coverage)
     print("Alignment Score:", alignment)
+
+    
